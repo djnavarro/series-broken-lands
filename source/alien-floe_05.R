@@ -1,0 +1,137 @@
+
+floe <- function(seed) {
+
+  library(rayshader)
+  library(tibble)
+  library(ambient)
+  library(dplyr)
+  library(ggplot2)
+  library(ggthemes)
+  library(dplyr)
+  library(tictoc)
+  library(here)
+  library(ragg)
+
+  sample_canva2 <- function(seed = NULL, n_steps = 4, n_base = 4) {
+
+    if(!is.null(seed)) set.seed(seed)
+    sample(ggthemes::canva_palettes, 1)[[1]][1:n_base] |>
+      (\(x) colorRampPalette(x)(n_steps))()
+  }
+
+  transform_to_curl_space <- function(x, y) {
+    curl_noise(
+      generator = fracture,
+      noise = gen_simplex,
+      fractal = fbm,
+      octaves = 3,
+      frequency = ~ . * 2,
+      freq_init = .1,
+      gain_init = 1,
+      gain = ~ . * .5,
+      x = x,
+      y = y
+    )
+  }
+
+  discretise <- function(x, n) {
+    round(x * n) / n
+  }
+
+  define_worley_cells <- function(x, y) {
+    fracture(
+      noise = gen_worley,
+      fractal = billow,
+      octaves = 8,
+      freq_init = .1,
+      frequency = ~ . * 2,
+      gain_init = 3,
+      gain = ~ . * .5,
+      value = "distance2",
+      x = x,
+      y = y
+    ) |>
+      normalise() |>
+      discretise(100)
+
+  }
+
+
+  simplex_noise <- function(x, y) {
+    fracture(
+      noise = gen_simplex,
+      fractal = billow,
+      octaves = 10,
+      freq_init = .01,
+      frequency = ~ . * 2,
+      gain_init = 1,
+      gain = ~ . * .8,
+      x = x,
+      y = y
+    ) |>
+      normalise()
+  }
+
+
+  ice_floe <- function(seed) {
+
+    set.seed(seed)
+
+    grid <- long_grid(
+      x = seq(0, 1, length.out = 2000),
+      y = seq(0, 1, length.out = 2000)
+    )
+
+    coords <- transform_to_curl_space(grid$x, grid$y)
+
+    grid |>
+      mutate(
+        cells = define_worley_cells(coords$x, coords$y),
+        paint = simplex_noise(x + cells, y + cells),
+        paint = normalise(paint)
+      ) |>
+      as.array(value = paint)
+  }
+
+  alien_floe <- function(seed) {
+
+    art <- ice_floe(seed)
+    art <- oce::matrixSmooth(art, passes = 6)
+    art <- discretise(art, 100)
+
+    height_shade(
+      heightmap = art,
+      texture = sample_canva2(seed, n_steps = 16, n_base = 3)
+    ) |>
+      add_shadow(
+        shadowmap = ray_shade(
+          heightmap = art,
+          sunaltitude = 50,
+          sunangle = 90,
+          multicore = TRUE,
+          zscale = .0003
+        ),
+        max_darken = .3
+      ) |>
+      plot_map()
+  }
+
+  sys_id <- "05"
+  fname <- paste0("alien-floe_", sys_id, "_", seed, ".png")
+  cat("generating", fname, "\n")
+  if(!dir.exists(here("output", sys_id))) {
+    dir.create(here("output"), sys_id)
+  }
+  agg_png(
+    filename = here("output", sys_id, fname),
+    width = 2000,
+    height = 2000
+  )
+  alien_floe(seed)
+  dev.off()
+
+}
+
+for(seed in 1400:1449) {
+  floe(seed)
+}
